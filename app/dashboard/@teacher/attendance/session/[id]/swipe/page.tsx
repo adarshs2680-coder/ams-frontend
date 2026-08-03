@@ -378,18 +378,32 @@ function SwipeAttendanceContent() {
 
       // Create new records
       if (toCreate.length > 0) {
-        await createBulkAttendanceRecords({
+        const createRes: any = await createBulkAttendanceRecords({
           session: session._id,
           records: toCreate,
         });
+        if (createRes?.errors && createRes.errors.length > 0) {
+          console.error("createBulkAttendanceRecords errors:", createRes.errors);
+          toast.error(`${createRes.errors.length} record(s) failed to create. Please retry.`);
+          return;
+        }
       }
 
       // Update existing records
       if (toUpdate.length > 0) {
-        await updateBulkAttendanceRecords({
+        const updateRes: any = await updateBulkAttendanceRecords({
           session: session._id,
           updates: toUpdate,
         });
+        if (updateRes?.errors && updateRes.errors.length > 0) {
+          console.error("updateBulkAttendanceRecords errors:", updateRes.errors);
+          const sample = updateRes.errors
+            .slice(0, 5)
+            .map((e: any) => e.recordId ?? e.student ?? e.message ?? JSON.stringify(e))
+            .join(", ");
+          toast.error(`${updateRes.errors.length} update(s) failed: ${sample}`);
+          return;
+        }
       }
 
       toast.success("Attendance successfully marked!");
