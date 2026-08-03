@@ -94,10 +94,29 @@ export interface CreateBulkRecordsData {
   records: BulkRecordData[];
 }
 
+export interface BulkUpdateRecordData {
+  recordId: string;
+  status?: AttendanceStatus;
+  remarks?: string;
+}
+
+export interface UpdateBulkRecordsData {
+  session: string;
+  updates: BulkUpdateRecordData[];
+}
+
 export interface BulkCreateResponse {
   created: AttendanceRecord[];
   errors: {
     student: string;
+    message: string;
+  }[];
+}
+
+export interface BulkUpdateResponse {
+  updated: AttendanceRecord[];
+  errors: {
+    recordId: string;
     message: string;
   }[];
 }
@@ -204,6 +223,28 @@ export async function createBulkAttendanceRecords(data: CreateBulkRecordsData): 
   }
 
   const result: ApiResponse<BulkCreateResponse> = await response.json();
+  return result.data;
+}
+
+/**
+ * Update multiple attendance records at once (staff only)
+ */
+export async function updateBulkAttendanceRecords(data: UpdateBulkRecordsData): Promise<BulkUpdateResponse> {
+  const response = await fetch(`${API_BASE}/attendance/record/bulk`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to update bulk attendance records');
+  }
+
+  const result: ApiResponse<BulkUpdateResponse> = await response.json();
   return result.data;
 }
 

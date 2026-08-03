@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Calendar, Clock, Users, BookOpen, Check, X, RotateCcw } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Users, BookOpen, Check, X } from "lucide-react";
 import { format } from "date-fns";
 import { getAttendanceSessionById, type AttendanceSession, type EmbeddedAttendanceRecord } from "@/lib/api/attendance-session";
 import { createBulkAttendanceRecords, updateAttendanceRecordById, type AttendanceStatus } from "@/lib/api/attendance-record";
@@ -26,7 +26,6 @@ export default function TickAttendancePage() {
   const [loading, setLoading] = useState(true);
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [markedStatuses, setMarkedStatuses] = useState<Record<string, AttendanceStatus>>({});
-  const [history, setHistory] = useState<Array<{ studentId: string; previous?: AttendanceStatus }>>([]);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   
@@ -96,28 +95,9 @@ export default function TickAttendancePage() {
 
   const markStudent = (studentId: string, status: AttendanceStatus) => {
     setMarkedStatuses((prev) => {
-      const previous = prev[studentId];
-      setHistory((historyPrev) => [...historyPrev, { studentId, previous }]);
       setSaveSuccess(false);
       return { ...prev, [studentId]: status };
     });
-  };
-
-  const undoLast = () => {
-    const lastAction = history[history.length - 1];
-    if (!lastAction) return;
-
-    setHistory((prev) => prev.slice(0, -1));
-    setMarkedStatuses((prev) => {
-      const next = { ...prev };
-      if (lastAction.previous) {
-        next[lastAction.studentId] = lastAction.previous;
-      } else {
-        delete next[lastAction.studentId];
-      }
-      return next;
-    });
-    setSaveSuccess(false);
   };
 
   const beginMarking = () => {
@@ -245,6 +225,9 @@ export default function TickAttendancePage() {
           <p className="text-muted-foreground">Mark students by ticking present or absent in a list</p>
         </div>
       </div>
+
+      
+
 
       {/* toasts are shown via Sonner Toaster mounted in dashboard layout */}
 
@@ -393,19 +376,16 @@ export default function TickAttendancePage() {
               })}
             </div>
           )}
-
-          {markMode && (
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button variant="outline" onClick={undoLast} disabled={history.length === 0 || saving}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Undo Last
-              </Button>
-              <Button onClick={submitAttendance} disabled={saving || students.length === 0}>
-                {saving ? "Saving..." : "Submit Attendance"}
-              </Button>
-            </div>
-          )}
-
+            {/* Fixed Submit Button */}
+      {markMode && (
+        <div className="fixed bottom-0 left-0 right-0 z-10 border-t bg-background/95 backdrop-blur-sm">
+          <div className="container mx-auto flex max-w-5xl items-center justify-end p-4">
+            <Button onClick={submitAttendance} disabled={saving || students.length === 0} className="w-full sm:w-auto">
+              {saving ? "Saving..." : "Submit Attendance"}
+            </Button>
+          </div>
+        </div>
+      )}
           {saveSuccess && (
             <div className="mt-4 rounded-lg border border-green-300 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
               Attendance has been saved successfully.

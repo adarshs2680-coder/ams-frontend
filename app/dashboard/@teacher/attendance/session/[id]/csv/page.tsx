@@ -11,7 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ArrowLeft, Calendar, Clock, FileSpreadsheet, CheckCircle2, CircleAlert } from "lucide-react";
 import { format } from "date-fns";
 import { getAttendanceSessionById, type AttendanceSession } from "@/lib/api/attendance-session";
-import { createBulkAttendanceRecords, updateAttendanceRecordById, listAttendanceRecords, type AttendanceStatus, type AttendanceRecord } from "@/lib/api/attendance-record";
+import { createBulkAttendanceRecords, updateBulkAttendanceRecords, listAttendanceRecords, type AttendanceStatus, type AttendanceRecord } from "@/lib/api/attendance-record";
 import { listUsers } from "@/lib/api/user";
 import type { User } from "@/lib/types/UserTypes";
 
@@ -120,8 +120,21 @@ export default function CsvAttendancePage() {
         page++;
       } while (page <= totalPages);
 
-      // Sort students in ascending order by name
+      // Sort students in ascending order by candidate code
       batchStudents.sort((a, b) => {
+        const profileA = (a.profile as any) || {};
+        const profileB = (b.profile as any) || {};
+        const codeA = String(profileA.candidate_code || '').trim();
+        const codeB = String(profileB.candidate_code || '').trim();
+
+        if (codeA && !codeB) return -1;
+        if (!codeA && codeB) return 1;
+
+        if (codeA && codeB) {
+          const codeComparison = codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+          if (codeComparison !== 0) return codeComparison;
+        }
+
         const nameA = (a.name || '').toLowerCase();
         const nameB = (b.name || '').toLowerCase();
         return nameA.localeCompare(nameB);
@@ -185,18 +198,12 @@ export default function CsvAttendancePage() {
 
       // Update existing records in parallel
       if (updateRecordsList.length > 0) {
-        const updatePromises = updateRecordsList.map(({ recordId, status }) =>
-          updateAttendanceRecordById(recordId, { status })
-        );
-        const results = await Promise.allSettled(updatePromises);
-        results.forEach((result) => {
-          if (result.status === 'fulfilled') {
-            updatedCount++;
-          } else {
-            console.error('Failed to update record:', result.reason);
-            errorCount++;
-          }
+        const result = await updateBulkAttendanceRecords({
+          session: session._id,
+          updates: updateRecordsList,
         });
+        updatedCount = (result.updated ?? []).length;
+        errorCount += (result.errors ?? []).length;
       }
 
       const totalSaved = createdCount + updatedCount;

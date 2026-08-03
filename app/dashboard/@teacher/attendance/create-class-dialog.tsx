@@ -204,26 +204,31 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
             </div>
             <div className="space-y-2">
               <Label>Subject</Label>
-              
+
               <Select value={subjectId} onValueChange={setSubjectId} disabled={loadingData || loadingSubjects || !batchId}>
                 <SelectTrigger className="min-w-0 max-w-full">
-                  <SelectValue className="truncate block" placeholder={
-                    loadingData ? "Loading..." :
-                    !batchId ? "Select batch first" :
-                    loadingSubjects ? "Loading subjects..." :
-                    "Select subject"
-                  } />
+                  <SelectValue
+                    className="truncate block"
+                    placeholder={
+                      loadingData
+                        ? "Loading..."
+                        : !batchId
+                        ? "Select batch first"
+                        : loadingSubjects
+                        ? "Loading subjects..."
+                        : "Select subject"
+                    }
+                  />
                 </SelectTrigger>
-                <SelectContent className="w-full max-w-[95vw]" >
+                <SelectContent className="w-full max-w-[95vw]">
                   <div className="pb-2">
-                  {subjects.map((subject) => (
-                    <SelectItem key={subject._id} value={subject._id}>
-                      
-                     <span className="block  w-full truncate">
-                        {subject.name} ({subject.subject_code})
-                      </span>
-                    </SelectItem>
-                  ))}
+                    {subjects.map((subject) => (
+                      <SelectItem key={subject._id} value={subject._id}>
+                        <span className="block w-full truncate">
+                          {subject.name} ({subject.subject_code})
+                        </span>
+                      </SelectItem>
+                    ))}
                   </div>
                 </SelectContent>
               </Select>

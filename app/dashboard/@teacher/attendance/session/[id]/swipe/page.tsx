@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Check, X, RotateCcw, Save } from "lucide-react";
 import { getAttendanceSessionById, type AttendanceSession, type EmbeddedAttendanceRecord } from "@/lib/api/attendance-session";
 import { listUsers } from "@/lib/api/user";
-import { createBulkAttendanceRecords, updateAttendanceRecordById, type AttendanceStatus } from "@/lib/api/attendance-record";
+import { createBulkAttendanceRecords, updateBulkAttendanceRecords, type AttendanceStatus } from "@/lib/api/attendance-record";
 import type { User } from "@/lib/types/UserTypes";
 import { toast } from "sonner";
 import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion";
@@ -386,11 +386,10 @@ function SwipeAttendanceContent() {
 
       // Update existing records
       if (toUpdate.length > 0) {
-        await Promise.all(
-          toUpdate.map(({ recordId, status }) =>
-            updateAttendanceRecordById(recordId, { status })
-          )
-        );
+        await updateBulkAttendanceRecords({
+          session: session._id,
+          updates: toUpdate,
+        });
       }
 
       toast.success("Attendance successfully marked!");

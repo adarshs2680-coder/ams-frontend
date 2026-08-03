@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, CheckCircle2, CircleAlert } from "lucide-react";
-import { createBulkAttendanceRecords, updateAttendanceRecordById, type AttendanceStatus } from "@/lib/api/attendance-record";
+import { createBulkAttendanceRecords, updateBulkAttendanceRecords, type AttendanceStatus } from "@/lib/api/attendance-record";
 import type { User } from "@/lib/types/UserTypes";
 import type { AttendanceSession, EmbeddedAttendanceRecord } from "@/lib/api/attendance-session";
 
@@ -167,18 +167,12 @@ export default function CsvAttendanceDialog({
       }
 
       if (updateRecordsList.length > 0) {
-        const updatePromises = updateRecordsList.map(({ recordId, status }) =>
-          updateAttendanceRecordById(recordId, { status })
-        );
-        const results = await Promise.allSettled(updatePromises);
-        results.forEach((result) => {
-          if (result.status === 'fulfilled') {
-            updatedCount++;
-          } else {
-            console.error('Failed to update record:', result.reason);
-            errorCount++;
-          }
+        const result = await updateBulkAttendanceRecords({
+          session: session._id,
+          updates: updateRecordsList,
         });
+        updatedCount = (result.updated ?? []).length;
+        errorCount += (result.errors ?? []).length;
       }
 
       const totalSaved = createdCount + updatedCount;
