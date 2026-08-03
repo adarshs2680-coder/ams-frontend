@@ -512,7 +512,7 @@ export default function SessionAttendanceMethodsPage() {
 
       {/* Mobile Submit Button */}
       {markMode && (
-        <div className="fixed bottom-15 left-0 right-0 z-10 border-t bg-background/95 backdrop-blur-sm sm:hidden">
+        <div className="fixed bottom-[60px] left-0 right-0 z-10 border-t bg-background/95 backdrop-blur-sm sm:hidden">
           <div className="container mx-auto flex max-w-5xl items-center justify-center p-4">
             <Button onClick={submitAttendance} disabled={saving || students.length === 0} className="w-full">
               {saving ? "Saving..." : "Submit"}
