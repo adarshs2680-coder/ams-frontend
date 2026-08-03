@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
+import JSZip from "jszip";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { createUsersBulk } from "@/lib/api/user";
-import { BulkCreateUserData, Department, UserRole } from "@/lib/types/UserTypes";
+import { BulkCreateUserData, BulkCreateUsersCredential, Department, UserRole } from "@/lib/types/UserTypes";
 import {
   Dialog,
   DialogContent,
@@ -42,8 +45,9 @@ type BulkUploadDialogProps = {
 };
 
 type BulkResult = {
-  success: Array<{ email: string; role?: string; userId?: string; studentCreated?: boolean }>;
-  failed: Array<{ email?: string; error?: string }>;
+  success: Array<{ email: string; role?: string; userId?: string; studentCreated?: boolean; name?: string; candidate_code?: string }>;
+  failed: Array<{ email?: string; error?: string; name?: string; candidate_code?: string }>;
+  credentials: BulkCreateUsersCredential[];
 };
 
 type CsvRow = Record<string, string | undefined>;
@@ -64,7 +68,7 @@ type PreviewRow = {
   payload?: BulkCreateUserData;
 };
 
-const TEMPLATE_HEADERS = [
+export const TEMPLATE_HEADERS = [
   "First Name",
   "Last Name",
   "Role",
@@ -79,7 +83,7 @@ const TEMPLATE_HEADERS = [
   "Batch",
 ] as const;
 
-type TemplateHeader = (typeof TEMPLATE_HEADERS)[number];
+export type TemplateHeader = (typeof TEMPLATE_HEADERS)[number];
 
 const ROLES: Array<{ value: UserRole; label: string }> = [
   { value: "student", label: "Student" },
@@ -205,7 +209,7 @@ function buildTemplateCsv(role: UserRole): string {
   return csv + "\n";
 }
 
-function downloadTextFile(filename: string, content: string, mime = "text/csv;charset=utf-8") {
+export function downloadTextFile(filename: string, content: string, mime = "text/csv;charset=utf-8") {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -215,6 +219,62 @@ function downloadTextFile(filename: string, content: string, mime = "text/csv;ch
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildCredentialsPdf(credentials: BulkCreateUsersCredential[]): Blob {
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.text("Student Mails - University College of Engineering, Kariavattom", 14, 16);
+  doc.text(`Generated on: ${format(new Date(), "yyyy-MM-dd HH:mm:ss")}`, 14, 22);
+  doc.setFontSize(12);
+  autoTable(doc, {
+    startY: 22,
+    head: [["Name", "Candidate Code", "Adm Year", "Department", "Email", "Password"]],
+    body: credentials.map((c) => [
+      c.name,
+      c.candidate_code,
+      c.adm_year != null ? String(c.adm_year) : "",
+      c.department ?? "",
+      c.email,
+      c.password,
+    ]),
+  });
+  return doc.output("blob");
+}
+
+/** Bundles success.csv, failed.csv, and (if any) credentials.pdf into one zip and downloads it. */
+async function downloadReportsZip(result: BulkResult) {
+  const zip = new JSZip();
+
+  const successCsv = Papa.unparse({
+    fields: ["name", "candidate_code", "email", "role", "userId"],
+    data: result.success.map((s) => [s.name ?? "", s.candidate_code ?? "", s.email, s.role ?? "", s.userId ?? ""]),
+  });
+  zip.file("success.csv", successCsv);
+
+  const failedCsv = Papa.unparse({
+    fields: ["name", "candidate_code", "email", "error"],
+    data: result.failed.map((f) => [f.name ?? "", f.candidate_code ?? "", f.email ?? "", f.error ?? ""]),
+  });
+  zip.file("failed.csv", failedCsv);
+
+  if (result.credentials.length > 0) {
+    zip.file("credentials.pdf", buildCredentialsPdf(result.credentials));
+  }
+
+  const blob = await zip.generateAsync({ type: "blob" });
+  downloadBlob(`ams-bulk-upload-reports-${Date.now()}.zip`, blob);
 }
 
 export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDialogProps) {
@@ -476,12 +536,17 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
       setIsSubmitting(true);
       const response = await createUsersBulk(payload);
 
-      setResult({
+      const bulkResult: BulkResult = {
         success: response.data?.success ?? [],
         failed: response.data?.failed ?? [],
-      });
+        credentials: response.data?.credentials ?? [],
+      };
+
+      setResult(bulkResult);
       setResultMessage(response.message || null);
       setResultStatusCode(response.httpStatus ?? response.status_code ?? null);
+
+      await downloadReportsZip(bulkResult);
 
       if (onSuccess) onSuccess();
     } catch (e) {
@@ -542,6 +607,16 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
               <div>
                 Completed: {succeededCount} succeeded, {failedCount} failed.
               </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                onClick={() => result && downloadReportsZip(result)}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download Reports (.zip)
+              </Button>
             </AlertDescription>
           </Alert>
         )}
@@ -616,11 +691,15 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
                       <TableHead>Role</TableHead>
                       <TableHead>Mail Generation</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Errors</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {previewRows.slice(0, 50).map((r) => (
-                      <TableRow key={r.rowNumber}>
+                      <TableRow
+                        key={r.rowNumber}
+                        className={r.errors.length ? "bg-destructive/10" : undefined}
+                      >
                         <TableCell className="text-muted-foreground">{r.rowNumber}</TableCell>
                         <TableCell>{r.first_name || "—"}</TableCell>
                         <TableCell>{r.last_name || "—"}</TableCell>
@@ -632,8 +711,19 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
                             <Badge variant="outline">Manual</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="whitespace-normal wrap-break-word max-w-[260px]">
+                        <TableCell className="whitespace-normal wrap-break-word max-w-65">
                           {r.generate_mail ? "(generated)" : r.email || "—"}
+                        </TableCell>
+                        <TableCell className="whitespace-normal wrap-break-word max-w-[320px]">
+                          {r.errors.length ? (
+                            <ul className="list-disc pl-4 text-destructive space-y-0.5">
+                              {r.errors.map((e, i) => (
+                                <li key={i}>{e}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -663,7 +753,7 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
                     <TableBody>
                       {result.success.slice(0, 50).map((s, idx) => (
                         <TableRow key={`${s.email}-${idx}`}>
-                          <TableCell className="whitespace-normal wrap-break-word max-w-[260px]">
+                          <TableCell className="whitespace-normal wrap-break-word max-w-65">
                             {s.email}
                           </TableCell>
                           <TableCell className="capitalize">{s.role ?? "—"}</TableCell>
@@ -703,10 +793,10 @@ export function BulkUploadDialog({ open, onOpenChange, onSuccess }: BulkUploadDi
                     <TableBody>
                       {result.failed.slice(0, 50).map((f, idx) => (
                         <TableRow key={`${f.email ?? "unknown"}-${idx}`}>
-                          <TableCell className="text-destructive whitespace-normal wrap-break-word max-w-[220px]">
+                          <TableCell className="text-destructive whitespace-normal wrap-break-word max-w-55">
                             {f.email || "(no identifier)"}
                           </TableCell>
-                          <TableCell className="text-destructive whitespace-normal wrap-break-word max-w-[360px]">
+                          <TableCell className="text-destructive whitespace-normal wrap-break-word max-w-90">
                             {f.error || "Unknown error"}
                           </TableCell>
                         </TableRow>

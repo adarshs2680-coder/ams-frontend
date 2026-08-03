@@ -5,15 +5,36 @@ import { AlertCircle, Bell } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import {
+  Users,
+  GraduationCap,
+  Building,
+  Flame,
+  ShieldCheck,
+  AlertTriangle,
+  AlertOctagon,
+  Megaphone,
+  Cpu,
+  ChevronDown,
+  Check
+} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { listBatches, type Batch } from "@/lib/api/batch";
 import {
-  checkIsAnyStaff,
   createNotification,
   deleteNotification,
   getStoredReadIds,
@@ -168,14 +189,28 @@ export default function NotificationsPage() {
   const [readIds, setReadIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isStaff, setIsStaff] = useState(false);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [batchesError, setBatchesError] = useState<string | null>(null);
+  const availableDepartments = useMemo(() => {
+    const fromBatches = batches.map((b) => b.department).filter(Boolean);
+    const defaults = ["CSE", "ECE", "IT", "EEE", "ME", "CE"];
+    return Array.from(new Set([...fromBatches, ...defaults]));
+  }, [batches]);
+
+  const availableYears = useMemo(() => {
+    const fromBatches = batches.map((b) => String(b.adm_year)).filter(Boolean);
+    const defaults = ["2026", "2025", "2024", "2023"];
+    const combined = Array.from(new Set([...fromBatches, ...defaults]));
+    return combined.sort((a, b) => b.localeCompare(a));
+  }, [batches]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeNotification, setActiveNotification] = useState<UiNotification | null>(null);
+  const [notificationToDelete, setNotificationToDelete] = useState<UiNotification | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const canCreateNotification = user?.role === "teacher";
   const [formState, setFormState] = useState({
     targetGroup: "batch",
     targetID: "",
@@ -200,16 +235,10 @@ export default function NotificationsPage() {
     }
   }, []);
 
-  const fetchIsStaff = useCallback(async () => {
-    const allowed = await checkIsAnyStaff();
-    setIsStaff(allowed);
-  }, []);
-
   useEffect(() => {
     if (!notificationsEnabled) return;
     fetchNotifications();
-    fetchIsStaff();
-  }, [fetchNotifications, fetchIsStaff, notificationsEnabled]);
+  }, [fetchNotifications, notificationsEnabled]);
 
   useEffect(() => {
     if (!user?._id) return;
@@ -218,10 +247,11 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     const fetchBatches = async () => {
+      if (!canCreateNotification) return;
       try {
         setBatchesLoading(true);
         setBatchesError(null);
-        const response = await listBatches({ limit: 200 });
+        const response = await listBatches({ limit: 100 });
         setBatches(response.batches || []);
       } catch (err) {
         setBatchesError(err instanceof Error ? err.message : "Failed to load batches");
@@ -231,7 +261,7 @@ export default function NotificationsPage() {
     };
 
     fetchBatches();
-  }, []);
+  }, [canCreateNotification]);
 
   const sortedNotifications = useMemo(() => {
     return [...notifications].sort((a, b) => {
@@ -273,6 +303,7 @@ export default function NotificationsPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteNotification(id);
+      setNotificationToDelete(null);
       setNotifications((prev) => prev.filter((notification) => notification.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete notification");
@@ -305,8 +336,8 @@ export default function NotificationsPage() {
     setIsSubmitting(true);
     try {
       await createNotification({
-        targetGroup: "batch",
-        targetID: formState.targetID.trim(),
+        targetGroup: formState.targetGroup,
+        targetID: formState.targetID.trim() || undefined,
         targetUsers,
         title: formState.title.trim(),
         message: formState.message.trim(),
@@ -315,12 +346,15 @@ export default function NotificationsPage() {
       });
 
       setSuccessMessage("Notification created successfully.");
-      setFormState((prev) => ({
-        ...prev,
+      setFormState({
+        targetGroup: "batch",
         targetID: "",
+        targetUsers: ["student"],
         title: "",
-        message: ""
-      }));
+        message: "",
+        priorityLevel: "medium",
+        notificationType: "general"
+      });
       await fetchNotifications();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create notification");
@@ -334,120 +368,359 @@ export default function NotificationsPage() {
     <div className="container mx-auto p-4 md:p-6 pb-20 md:pb-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Notifications</h1>
-        <Button size="sm" variant="outline" onClick={handleMarkAllRead} disabled={!hasUnread}>
-          Mark all read
-        </Button>
+        <div className="flex items-center gap-2">
+          {canCreateNotification && (
+            <Button size="sm" onClick={() => setIsCreateOpen((s) => !s)}>
+              {isCreateOpen ? "Close" : "Create"}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={handleMarkAllRead} disabled={!hasUnread}>
+            Mark all read
+          </Button>
+        </div>
       </div>
 
-      {isStaff && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Create Notification</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {formError && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {formError}
-              </div>
-            )}
-            {successMessage && (
-              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
-                {successMessage}
-              </div>
-            )}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Target Group</Label>
-                <Input value="batch" disabled />
-              </div>
-              <div className="space-y-2">
-                <Label>Target ID (optional)</Label>
-                <Select
-                  value={formState.targetID}
-                  onValueChange={(value) => setFormState((prev) => ({ ...prev, targetID: value }))}
-                  disabled={batchesLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={batchesLoading ? "Loading batches..." : "Select batch"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {batches.map((batch) => (
-                      <SelectItem key={batch._id} value={batch._id}>
-                        {batch.name}{batch.id ? ` (${batch.id})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {batchesError && <p className="text-xs text-destructive">{batchesError}</p>}
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Target Users</Label>
-                <Input value="student" disabled />
-              </div>
-              <div className="space-y-2">
-                <Label>Title</Label>
-                <Input
-                  value={formState.title}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, title: event.target.value }))}
-                  placeholder="Notification title"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Priority Level</Label>
-                <Select
-                  value={formState.priorityLevel}
-                  onValueChange={(value) => setFormState((prev) => ({ ...prev, priorityLevel: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRIORITY_UI_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Notification Type</Label>
-                <Select
-                  value={formState.notificationType}
-                  onValueChange={(value) => setFormState((prev) => ({ ...prev, notificationType: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TYPE_UI_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Message</Label>
-                <Textarea
-                  value={formState.message}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, message: event.target.value }))}
-                  placeholder="Write your message"
-                  rows={4}
-                />
-              </div>
+      {canCreateNotification && (
+        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+          <DialogContent className="sm:max-w-[620px] p-0 overflow-hidden gap-0 rounded-xl border border-border bg-background shadow-2xl">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-border/40">
+              <DialogTitle className="text-lg font-semibold tracking-tight">Create Notification</DialogTitle>
+              <DialogDescription className="sr-only">Post a notification for students, staff, or parents</DialogDescription>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={handleCreateNotification} disabled={isSubmitting}>
-                {isSubmitting ? "Creating..." : "Create Notification"}
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Target group is fixed to batch.
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+
+                  <div className="p-6 space-y-4">
+                    {formError && (
+                      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{formError}</span>
+                      </div>
+                    )}
+
+                    {/* Selector Pills Row */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* 1. Target Users Dropdown */}
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span>
+                              {formState.targetUsers.length === 0
+                                ? "Select Target"
+                                : formState.targetUsers.length === 3
+                                ? "All Users"
+                                : formState.targetUsers.map((u) => u.charAt(0).toUpperCase() + u.slice(1)).join(", ")}
+                            </span>
+                            <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-48 z-150">
+                          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Target Recipients</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {['student','staff','parent'].map((role) => {
+                            const isChecked = formState.targetUsers.includes(role);
+                            return (
+                              <DropdownMenuCheckboxItem
+                                key={role}
+                                checked={isChecked}
+                                onSelect={(e) => e.preventDefault()}
+                                onCheckedChange={(checked) => {
+                                  setFormState((prev) => {
+                                    const current = new Set(prev.targetUsers);
+                                    if (checked) current.add(role);
+                                    else current.delete(role);
+                                    return { ...prev, targetUsers: Array.from(current) };
+                                  });
+                                }}
+                                className="text-xs capitalize cursor-pointer"
+                              >
+                                {role}
+                              </DropdownMenuCheckboxItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      {/* 2. Target Group Dropdown */}
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                          >
+                            <Building className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="capitalize">Group: {formState.targetGroup}</span>
+                            <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44 z-150">
+                          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Target Group</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {[
+                            { value: "college", label: "College" },
+                            { value: "year", label: "Year" },
+                            { value: "batch", label: "Batch" },
+                            { value: "department", label: "Department" }
+                          ].map((item) => (
+                            <DropdownMenuItem
+                              key={item.value}
+                              onSelect={() => setFormState((prev) => ({ ...prev, targetGroup: item.value, targetID: "" }))}
+                              className="text-xs flex items-center justify-between cursor-pointer"
+                            >
+                              <span>{item.label}</span>
+                              {formState.targetGroup === item.value && <Check className="w-3.5 h-3.5 text-primary ml-2 shrink-0" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      {/* 3. Dynamic Target ID Dropdown depending on targetGroup */}
+                      {formState.targetGroup === "batch" && (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                            >
+                              <GraduationCap className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span className="truncate max-w-[140px]">
+                                {batchesLoading
+                                  ? "Loading..."
+                                  : batches.find((b) => b._id === formState.targetID || b.id === formState.targetID || b.name === formState.targetID)?.name || "Select Batch"}
+                              </span>
+                              <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-56 max-h-60 overflow-y-auto z-150">
+                            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Select Batch</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {batches.map((batch) => {
+                              const val = batch._id || batch.id || batch.name;
+                              return (
+                                <DropdownMenuItem
+                                  key={batch._id}
+                                  onSelect={() => setFormState((prev) => ({ ...prev, targetID: val }))}
+                                  className="text-xs flex items-center justify-between cursor-pointer"
+                                >
+                                  <span className="truncate">{batch.name}{batch.id ? ` (${batch.id})` : ""}</span>
+                                  {formState.targetID === val && <Check className="w-3.5 h-3.5 text-primary ml-2 shrink-0" />}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+
+                      {formState.targetGroup === "year" && (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span>
+                                {formState.targetID ? `Year: ${formState.targetID}` : "Select Year"}
+                              </span>
+                              <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-48 max-h-60 overflow-y-auto z-150">
+                            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Select Year</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {availableYears.map((yr) => (
+                              <DropdownMenuItem
+                                key={yr}
+                                onSelect={() => setFormState((prev) => ({ ...prev, targetID: yr }))}
+                                className="text-xs flex items-center justify-between cursor-pointer"
+                              >
+                                <span>Year {yr}</span>
+                                {formState.targetID === yr && <Check className="w-3.5 h-3.5 text-primary ml-2 shrink-0" />}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+
+                      {formState.targetGroup === "department" && (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                            >
+                              <Building className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span>
+                                {formState.targetID
+                                  ? `Dept: ${formState.targetID}`
+                                  : "Select Department"}
+                              </span>
+                              <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-48 max-h-60 overflow-y-auto z-150">
+                            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Select Department</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {availableDepartments.map((dept) => (
+                              <DropdownMenuItem
+                                key={dept}
+                                onSelect={() => setFormState((prev) => ({ ...prev, targetID: dept }))}
+                                className="text-xs flex items-center justify-between cursor-pointer"
+                              >
+                                <span>{dept}</span>
+                                {formState.targetID === dept && <Check className="w-3.5 h-3.5 text-primary ml-2 shrink-0" />}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+
+                    {/* Center Stage: Title & Message Area */}
+                    <div className="space-y-3 pt-3 border-t border-border/40">
+                      <Input
+                        value={formState.title}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, title: event.target.value }))}
+                        placeholder="Title (e.g. Midterm Exam Schedule)"
+                        className="text-base font-semibold border border-border/60 bg-muted/20 focus-visible:ring-1 focus-visible:ring-ring px-4 py-3 h-11 rounded-lg placeholder:text-muted-foreground/50 shadow-xs"
+                      />
+                      <Textarea
+                        value={formState.message}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, message: event.target.value }))}
+                        placeholder="Share notification body details..."
+                        rows={6}
+                        className="min-h-40 resize-none border border-border/60 bg-muted/20 focus-visible:ring-1 focus-visible:ring-ring p-4 rounded-lg text-sm leading-relaxed placeholder:text-muted-foreground/40 shadow-xs"
+                      />
+                    </div>
+
+                  </div>
+
+                  {/* Bottom Toolbar: Priority Level & Notification Type as Icon Pills with Labels */}
+                  <div className="flex items-center justify-between px-6 py-3.5 bg-muted/20 border-t border-border/50">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Priority Level Selector */}
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                          >
+                            {formState.priorityLevel === "high" ? (
+                              <>
+                                <Flame className="w-4 h-4 text-red-500" />
+                                <span>High Priority</span>
+                              </>
+                            ) : formState.priorityLevel === "medium" ? (
+                              <>
+                                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                <span>Medium Priority</span>
+                              </>
+                            ) : (
+                              <>
+                                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                                <span>Low Priority</span>
+                              </>
+                            )}
+                            <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44 z-150">
+                          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Priority Level</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => setFormState((prev) => ({ ...prev, priorityLevel: "low" }))} className="text-xs flex items-center justify-between cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                              <span>Low</span>
+                            </div>
+                            {formState.priorityLevel === "low" && <Check className="w-3.5 h-3.5 text-primary" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setFormState((prev) => ({ ...prev, priorityLevel: "medium" }))} className="text-xs flex items-center justify-between cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-500" />
+                              <span>Medium</span>
+                            </div>
+                            {formState.priorityLevel === "medium" && <Check className="w-3.5 h-3.5 text-primary" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setFormState((prev) => ({ ...prev, priorityLevel: "high" }))} className="text-xs flex items-center justify-between cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <Flame className="w-4 h-4 text-red-500" />
+                              <span>High</span>
+                            </div>
+                            {formState.priorityLevel === "high" && <Check className="w-3.5 h-3.5 text-primary" />}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      {/* Notification Type Selector */}
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-muted/40 hover:bg-muted text-xs font-medium text-foreground transition-colors outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                          >
+                            {formState.notificationType === "alert" ? (
+                              <>
+                                <AlertOctagon className="w-4 h-4 text-amber-500" />
+                                <span>Alert</span>
+                              </>
+                            ) : formState.notificationType === "academic" ? (
+                              <>
+                                <GraduationCap className="w-4 h-4 text-indigo-500" />
+                                <span>Academic</span>
+                              </>
+                            ) : formState.notificationType === "system" ? (
+                              <>
+                                <Cpu className="w-4 h-4 text-purple-500" />
+                                <span>System</span>
+                              </>
+                            ) : (
+                              <>
+                                <Megaphone className="w-4 h-4 text-blue-500" />
+                                <span>General</span>
+                              </>
+                            )}
+                            <ChevronDown className="w-3 h-3 text-muted-foreground ml-0.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44 z-150">
+                          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Notification Type</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {[
+                            { value: "general", label: "General", icon: <Megaphone className="w-4 h-4 text-blue-500" /> },
+                            { value: "alert", label: "Alert", icon: <AlertOctagon className="w-4 h-4 text-amber-500" /> },
+                            { value: "academic", label: "Academic", icon: <GraduationCap className="w-4 h-4 text-indigo-500" /> },
+                            { value: "system", label: "System", icon: <Cpu className="w-4 h-4 text-purple-500" /> }
+                          ].map((item) => (
+                            <DropdownMenuItem
+                              key={item.value}
+                              onSelect={() => setFormState((prev) => ({ ...prev, notificationType: item.value }))}
+                              className="text-xs flex items-center justify-between cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                {item.icon}
+                                <span>{item.label}</span>
+                              </div>
+                              {formState.notificationType === item.value && <Check className="w-3.5 h-3.5 text-primary" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={handleCreateNotification}
+                        disabled={isSubmitting}
+                        className="rounded-full px-6 font-medium text-xs shadow-xs"
+                      >
+                        {isSubmitting ? "Posting..." : "Post"}
+                      </Button>
+                    </div>
+                  </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       <Card>
@@ -537,14 +810,14 @@ export default function NotificationsPage() {
                             Mark as Read
                           </Button>
                         )}
-                        {isStaff && (
+                        {canCreateNotification && (
                           <Button
                             size="sm"
                             variant="ghost"
                             className="w-full justify-center text-destructive md:w-auto"
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleDelete(notification.id);
+                              setNotificationToDelete(notification);
                             }}
                           >
                             Delete
@@ -559,6 +832,31 @@ export default function NotificationsPage() {
           )}
         </CardContent>
       </Card>
+      {notificationToDelete && (
+        <Dialog open={!!notificationToDelete} onOpenChange={(open) => !open && setNotificationToDelete(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Are you sure you want to delete this?</DialogTitle>
+              <DialogDescription>
+                This action cannot be undone. This will permanently delete the notification titled &quot;{notificationToDelete.title}&quot;.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setNotificationToDelete(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (notificationToDelete) handleDelete(notificationToDelete.id);
+                }}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       <Dialog open={Boolean(activeNotification)} onOpenChange={(open) => {
         if (!open) setActiveNotification(null);
       }}>

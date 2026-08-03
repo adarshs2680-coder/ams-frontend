@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BookOpen, Users } from "lucide-react";
+import { BookOpen, Users, AlertCircle } from "lucide-react";
 import { createAttendanceSession, type CreateSessionData, type SessionType, type UniqueSession } from "@/lib/api/attendance-session";
 import { format, setHours, setMinutes, setSeconds, setMilliseconds } from "date-fns";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,7 @@ interface QuickStartDialogProps {
 export default function QuickStartDialog({ session, open, onOpenChange, onSessionCreated }: QuickStartDialogProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [duration, setDuration] = useState<number>(1);
   const [startHour, setStartHour] = useState<number>(new Date().getHours());
   const [sessionType, setSessionType] = useState<SessionType>("regular");
@@ -30,12 +31,14 @@ export default function QuickStartDialog({ session, open, onOpenChange, onSessio
       setStartHour(new Date().getHours());
       setDuration(1);
       setSessionType("regular");
+      setError(null);
     }
   }, [open]);
 
   if (!session) return null;
 
   const handleStartClass = async () => {
+    setError(null);
     setLoading(true);
     try {
       // Create start time at the selected hour with 0 minutes and seconds
@@ -64,9 +67,9 @@ export default function QuickStartDialog({ session, open, onOpenChange, onSessio
       
       // Navigate to the session page
       router.push(`/dashboard/attendance/session/${newSession._id}`);
-    } catch (error) {
-      console.error("Failed to start class:", error);
-      alert(error instanceof Error ? error.message : "Failed to start class");
+    } catch (err) {
+      console.error("Failed to start class:", err);
+      setError(err instanceof Error ? err.message : "Failed to start class");
     } finally {
       setLoading(false);
     }
@@ -96,6 +99,13 @@ export default function QuickStartDialog({ session, open, onOpenChange, onSessio
         </DialogHeader>
 
         <div className="space-y-6">
+          {error && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Class Info + Schedule Preview */}
           <div className="bg-muted rounded-lg p-5 space-y-3">
             <div className="flex items-start justify-between gap-4">

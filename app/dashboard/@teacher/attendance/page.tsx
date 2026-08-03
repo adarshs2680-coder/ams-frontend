@@ -35,6 +35,23 @@ type ClassFilterItem = {
   };
 };
 
+const useIsMobile = (breakpoint = 768) => {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkScreenSize = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, [breakpoint]);
+
+  return isMobile;
+};
+
 export default function AttendancePage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -46,6 +63,7 @@ export default function AttendancePage() {
   const [selectedClass, setSelectedClass] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [semesterByGroupKey, setSemesterByGroupKey] = useState<Record<string, string>>({});
+  const isMobile = useIsMobile();
 
   const extractYearFromBatch = (batch: AttendanceSession["batch"]): string | null => {
     const normalizeTwoDigitYear = (yy: string) => {
@@ -367,16 +385,18 @@ export default function AttendancePage() {
 
       {/* Filter by Class */}
       {!loading && uniqueClasses.length > 0 && (
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Filter by Class:</span>
+            <span className="flex text-sm font-medium">
+              {isMobile && selectedClass !== "all" ? "Filter" : "Filter by Class:"}
+            </span>
           </div>
           <Select value={selectedClass} onValueChange={setSelectedClass}>
-            <SelectTrigger className="w-75">
+            <SelectTrigger className="sm:inline text-sm truncate">
               <SelectValue placeholder="All Classes" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="w-full max-w-[95vw]">
               <SelectItem value="all">All Classes</SelectItem>
               {uniqueClasses.map((classItem) => {
                 const key = `${classItem.batch._id}-${classItem.subject._id}`;

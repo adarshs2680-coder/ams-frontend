@@ -13,6 +13,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Form,
   FormControl,
   FormField,
@@ -31,8 +42,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Check, Copy, Loader2, Pencil, X } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, LogOut, Pencil, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
+import { ResetPasswordDialog } from "./reset-password-dialog";
+import { BanUserDialog } from "./ban-user-dialog";
 
 // ─── Form Schema ──────────────────────────────────────────────────────────────
 
@@ -80,10 +95,39 @@ export function UserDialog({
   const [isEditing, setIsEditing] = useState(initialMode === "edit");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
+  const [banDialogOpen, setBanDialogOpen] = useState(false);
+  const [isUnbanning, setIsUnbanning] = useState(false);
+  const [isRevoking, setIsRevoking] = useState(false);
 
   useEffect(() => {
     setIsEditing(initialMode === "edit");
   }, [initialMode, open]);
+
+  const handleUnban = async () => {
+    try {
+      setIsUnbanning(true);
+      await authClient.admin.unbanUser({ userId: user._id });
+      toast.success(`${user.name} has been unbanned.`);
+      onSuccess?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to unban user");
+    } finally {
+      setIsUnbanning(false);
+    }
+  };
+
+  const handleRevokeSessions = async () => {
+    try {
+      setIsRevoking(true);
+      await authClient.admin.revokeUserSessions({ userId: user._id });
+      toast.success(`All sessions for ${user.name} have been revoked.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke sessions");
+    } finally {
+      setIsRevoking(false);
+    }
+  };
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -250,6 +294,11 @@ export function UserDialog({
                       Profile Incomplete
                     </Badge>
                   )}
+                  {user.banned && (
+                    <Badge variant="destructive" className="mt-2">
+                      Banned{user.banReason ? `: ${user.banReason}` : ""}
+                    </Badge>
+                  )}
                 </div>
 
                 {/* Account Meta */}
@@ -264,17 +313,81 @@ export function UserDialog({
                   </div>
                 </div>
 
-                {/* Edit Button */}
+                {/* Edit / Reset Password Buttons */}
                 {!isEditing && (
-                  <Button
-                    variant="outline"
-                    className="w-full mt-2"
-                    onClick={() => setIsEditing(true)}
-                    type="button"
-                  >
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Edit User
-                  </Button>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setIsEditing(true)}
+                      type="button"
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit User
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setResetPasswordOpen(true)}
+                      type="button"
+                    >
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      Reset Password
+                    </Button>
+
+                    {user.banned ? (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={handleUnban}
+                        disabled={isUnbanning}
+                        type="button"
+                      >
+                        {isUnbanning ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                        )}
+                        Unban User
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        className="w-full text-destructive hover:text-destructive"
+                        onClick={() => setBanDialogOpen(true)}
+                        type="button"
+                      >
+                        <ShieldAlert className="mr-2 h-4 w-4" />
+                        Ban User
+                      </Button>
+                    )}
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" className="w-full" type="button" disabled={isRevoking}>
+                          {isRevoking ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <LogOut className="mr-2 h-4 w-4" />
+                          )}
+                          Revoke Sessions
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Revoke all sessions?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            <span className="font-medium">{user.name}</span> will be signed out of every
+                            device immediately and need to sign in again.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleRevokeSessions}>Revoke</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 )}
               </div>
 
@@ -630,6 +743,21 @@ export function UserDialog({
           </form>
         </Form>
       </DialogContent>
+
+      <ResetPasswordDialog
+        userId={user._id}
+        userName={user.name}
+        open={resetPasswordOpen}
+        onOpenChange={setResetPasswordOpen}
+      />
+
+      <BanUserDialog
+        userId={user._id}
+        userName={user.name}
+        open={banDialogOpen}
+        onOpenChange={setBanDialogOpen}
+        onSuccess={onSuccess}
+      />
     </Dialog>
   );
 }

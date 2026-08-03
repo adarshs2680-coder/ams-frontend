@@ -63,6 +63,11 @@ export interface User {
   createdAt?: string;
   updatedAt?: string;
 
+  /** Better-Auth admin plugin fields */
+  banned?: boolean;
+  banReason?: string;
+  banExpires?: string;
+
   /** Role-specific embedded profile */
   profile: UserProfile;
 }
@@ -142,14 +147,29 @@ export interface BulkCreateUsersSuccess {
   email: string;
   role?: UserRole;
   userId?: string;
+  name?: string;
+  candidate_code?: string;
 }
 
 export interface BulkCreateUsersFailure {
   email?: string;
   error?: string;
+  name?: string;
+  candidate_code?: string;
+}
+
+export interface BulkCreateUsersCredential {
+  name: string;
+  candidate_code: string;
+  adm_year?: number;
+  department?: string;
+  email: string;
+  password: string;
 }
 
 export interface BulkCreateUsersResponseData {
   success?: BulkCreateUsersSuccess[];
   failed?: BulkCreateUsersFailure[];
+  /** Newly created Google Workspace accounts (generate_mail rows only) — name/candidate code/email/password. */
+  credentials?: BulkCreateUsersCredential[];
 }

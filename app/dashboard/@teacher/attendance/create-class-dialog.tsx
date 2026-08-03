@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BookOpen, Users, Plus } from "lucide-react";
+import { BookOpen, Users, Plus, AlertCircle } from "lucide-react";
 import { createAttendanceSession, type CreateSessionData, type SessionType } from "@/lib/api/attendance-session";
 import { listBatches, type Batch } from "@/lib/api/batch";
 import { listSubjects, type Subject } from "@/lib/api/subject";
@@ -21,6 +21,7 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loadingData, setLoadingData] = useState(true);
@@ -41,6 +42,7 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
       setSessionType("regular");
       setBatchId("");
       setSubjectId("");
+      setError(null);
     }
   }, [open]);
 
@@ -107,6 +109,7 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
 
   const handleSubmit = async () => {
     if (!batchId || !subjectId) return;
+    setError(null);
     setLoading(true);
     try {
       const startTime = getStartTimePreview();
@@ -125,9 +128,9 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
       setOpen(false);
       onClassCreated?.();
       router.push(`/dashboard/attendance/session/${newSession._id}`);
-    } catch (error) {
-      console.error("Failed to create class:", error);
-      alert(error instanceof Error ? error.message : "Failed to create class");
+    } catch (err) {
+      console.error("Failed to create class:", err);
+      setError(err instanceof Error ? err.message : "Failed to create class");
     } finally {
       setLoading(false);
     }
@@ -150,13 +153,20 @@ export default function CreateClassDialog({ onClassCreated }: CreateClassDialogP
         </DialogHeader>
 
         <div className="space-y-6">
+          {error && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Schedule Preview */}
           <div className="bg-muted rounded-lg p-4 space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-top gap-1.5 min-w-0">
                 <BookOpen className="h-4 w-4 text-primary mt-5 shrink-0" />
                 <div className="min-w-0">
-                  <p className="font-semibold line-clamp-2 break-words">
+                  <p className="font-semibold line-clamp-2 wrap-break-word">
                     {selectedSubject ? selectedSubject.name : <span className="text-muted-foreground font-normal">No subject selected</span>}
                   </p>
                   <p className="text-xs text-muted-foreground">

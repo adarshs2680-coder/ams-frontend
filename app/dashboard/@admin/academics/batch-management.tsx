@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Batch, listBatches, PaginationInfo } from "@/lib/api/batch";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Batch, listBatches, isAlumniSem } from "@/lib/api/batch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,34 +12,174 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Eye, Pencil, Trash2, Search, Plus, Upload } from "lucide-react";
+import { AlertCircle, ChevronRight, Eye, Pencil, Trash2, Search, Plus, Upload, ArrowUpCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 import { AddBatchDialog } from "./add-batch-dialog";
 import { BatchDialog } from "./batch-dialog";
 import { DeleteBatchDialog } from "./delete-batch-dialog";
 import { BulkUploadBatchDialog } from "./bulk-upload-batch-dialog";
+import { AdvanceSemesterDialog } from "./advance-semester-dialog";
 
-const ITEMS_PER_PAGE = 10;
+const FETCH_LIMIT = 100;
+
+const getDepartmentBadgeColor = (department: string) => {
+  switch (department) {
+    case "CSE": return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+    case "ECE": return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+    case "IT": return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+    default: return "";
+  }
+};
+
+interface YearGroupProps {
+  year: number;
+  batches: Batch[];
+  defaultOpen: boolean;
+  selectable: boolean;
+  showSem: boolean;
+  editable: boolean;
+  selectedIds: Set<string>;
+  onToggleBatch: (id: string) => void;
+  onToggleYear?: (batches: Batch[]) => void;
+  onView: (batch: Batch) => void;
+  onEdit: (batch: Batch) => void;
+  onDelete: (batch: Batch) => void;
+}
+
+function BatchYearGroup({
+  year,
+  batches,
+  defaultOpen,
+  selectable,
+  showSem,
+  editable,
+  selectedIds,
+  onToggleBatch,
+  onToggleYear,
+  onView,
+  onEdit,
+  onDelete,
+}: YearGroupProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const allSelected = selectable && batches.every((b) => selectedIds.has(b._id));
+  const someSelected = selectable && !allSelected && batches.some((b) => selectedIds.has(b._id));
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div className="rounded-md border">
+        <div className="flex items-center gap-2 px-3 py-2 bg-muted/30">
+          {selectable && (
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={() => onToggleYear?.(batches)}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Select all batches in ${year}`}
+            />
+          )}
+          <CollapsibleTrigger asChild>
+            <button type="button" className="flex flex-1 items-center gap-2 py-1 text-left">
+              <ChevronRight className={cn("h-4 w-4 transition-transform", isOpen && "rotate-90")} />
+              <span className="font-semibold">{year}</span>
+              <Badge variant="secondary">{batches.length}</Badge>
+            </button>
+          </CollapsibleTrigger>
+        </div>
+
+        <CollapsibleContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {selectable && <TableHead className="w-10" />}
+                <TableHead>Batch Name</TableHead>
+                {showSem && <TableHead>Semester</TableHead>}
+                <TableHead>Scheme</TableHead>
+                <TableHead>Department</TableHead>
+                <TableHead>Batch Strength</TableHead>
+                <TableHead>Staff Advisor</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {batches.map((batch) => (
+                <TableRow key={batch._id}>
+                  {selectable && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(batch._id)}
+                        onCheckedChange={() => onToggleBatch(batch._id)}
+                        aria-label={`Select ${batch.name}`}
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell className="font-medium">{batch.name}</TableCell>
+                  {showSem && <TableCell>{batch.sem}</TableCell>}
+                  <TableCell className="text-muted-foreground">{batch.scheme}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={getDepartmentBadgeColor(batch.department)}>
+                      {batch.department}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{batch.studentCount ?? "—"}</TableCell>
+                  <TableCell>
+                    {batch.staff_advisor ? (
+                      <div>
+                        <div className="font-medium">
+                          {batch.staff_advisor.first_name} {batch.staff_advisor.last_name}
+                        </div>
+                        <div className="text-sm text-muted-foreground">{batch.staff_advisor.email}</div>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">No advisor</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => onView(batch)} title="View details">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      {editable && (
+                        <Button variant="ghost" size="icon" onClick={() => onEdit(batch)} title="Edit batch">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => onDelete(batch)}
+                        title="Delete batch"
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
 
 export function BatchManagement() {
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   // Dialog states
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
@@ -47,25 +187,21 @@ export function BatchManagement() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [addBatchDialogOpen, setAddBatchDialogOpen] = useState(false);
   const [bulkUploadDialogOpen, setBulkUploadDialogOpen] = useState(false);
+  const [advanceDialogOpen, setAdvanceDialogOpen] = useState(false);
 
   const fetchBatches = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      
-      const data = await listBatches({
-        page: currentPage,
-        limit: ITEMS_PER_PAGE,
-      });
-      
+
+      const data = await listBatches({ limit: FETCH_LIMIT });
       setBatches(data.batches);
-      setPagination(data.pagination);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch batches");
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage]);
+  }, []);
 
   useEffect(() => {
     fetchBatches();
@@ -94,7 +230,6 @@ export function BatchManagement() {
   };
 
   const handleAddSuccess = async () => {
-    setCurrentPage(1);
     await fetchBatches();
   };
 
@@ -102,67 +237,64 @@ export function BatchManagement() {
     await fetchBatches();
   };
 
-  const getDepartmentBadgeColor = (department: string) => {
-    switch (department) {
-      case "CSE": return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
-      case "ECE": return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
-      case "IT": return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
-      default: return "";
-    }
-  };
-
-  const renderPagination = () => {
-    if (!pagination || pagination.totalPages <= 1) return null;
-
-    const pages = [];
-    for (let i = 1; i <= pagination.totalPages; i++) {
-      pages.push(i);
-    }
-
-    return (
-      <Pagination>
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious
-              onClick={() => currentPage > 1 && setCurrentPage(currentPage - 1)}
-              className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-            />
-          </PaginationItem>
-          
-          {pages.map((page) => (
-            <PaginationItem key={page}>
-              <PaginationLink
-                onClick={() => setCurrentPage(page)}
-                isActive={currentPage === page}
-                className="cursor-pointer"
-              >
-                {page}
-              </PaginationLink>
-            </PaginationItem>
-          ))}
-          
-          <PaginationItem>
-            <PaginationNext
-              onClick={() => currentPage < pagination.totalPages && setCurrentPage(currentPage + 1)}
-              className={currentPage === pagination.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-            />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
-    );
+  const handleAdvanceSuccess = async () => {
+    setSelectedIds(new Set());
+    await fetchBatches();
   };
 
   const filteredBatches = batches.filter((batch) => {
     const query = searchQuery.toLowerCase();
+    if (!query) return true;
     const advisor = batch.staff_advisor;
     return (
       batch?.name.toLowerCase().includes(query) ||
       batch.department.toLowerCase().includes(query) ||
       batch.adm_year.toString().includes(query) ||
+      batch.sem?.toLowerCase().includes(query) ||
+      batch.scheme?.toLowerCase().includes(query) ||
       advisor?.first_name?.toLowerCase().includes(query) ||
       advisor?.last_name?.toLowerCase().includes(query)
     );
   });
+
+  const activeBatches = useMemo(() => filteredBatches.filter((b) => !isAlumniSem(b.sem)), [filteredBatches]);
+  const alumniBatches = useMemo(() => filteredBatches.filter((b) => isAlumniSem(b.sem)), [filteredBatches]);
+
+  const groupByYear = (list: Batch[]) => {
+    const groups = new Map<number, Batch[]>();
+    for (const batch of list) {
+      const bucket = groups.get(batch.adm_year) ?? [];
+      bucket.push(batch);
+      groups.set(batch.adm_year, bucket);
+    }
+    return [...groups.entries()].sort((a, b) => b[0] - a[0]);
+  };
+
+  const yearGroups = useMemo(() => groupByYear(activeBatches), [activeBatches]);
+  const alumniYearGroups = useMemo(() => groupByYear(alumniBatches), [alumniBatches]);
+
+  const toggleBatchSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleYearSelection = (yearBatches: Batch[]) => {
+    const allSelected = yearBatches.every((b) => selectedIds.has(b._id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const b of yearBatches) {
+        if (allSelected) next.delete(b._id);
+        else next.add(b._id);
+      }
+      return next;
+    });
+  };
+
+  const selectedBatches = batches.filter((b) => selectedIds.has(b._id));
 
   return (
     <>
@@ -194,6 +326,23 @@ export function BatchManagement() {
               </Button>
             </div>
           </div>
+
+          {selectedIds.size > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-2.5 mt-2">
+              <span className="text-sm font-medium">
+                {selectedIds.size} batch{selectedIds.size === 1 ? "" : "es"} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                  Clear
+                </Button>
+                <Button size="sm" onClick={() => setAdvanceDialogOpen(true)} className="gap-2">
+                  <ArrowUpCircle className="h-4 w-4" />
+                  Advance Semester
+                </Button>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {error && (
@@ -209,83 +358,60 @@ export function BatchManagement() {
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
-          ) : filteredBatches.length === 0 ? (
+          ) : yearGroups.length === 0 && alumniYearGroups.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               {searchQuery ? "No batches found matching your search" : "No batches available"}
             </div>
           ) : (
             <>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Batch Name</TableHead>
-                      <TableHead>Year</TableHead>
-                      <TableHead>Semester</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Staff Advisor</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredBatches.map((batch) => (
-                      <TableRow key={batch._id}>
-                        <TableCell className="font-medium">{batch.name}</TableCell>
-                        <TableCell>{batch.adm_year}</TableCell>
-                        <TableCell>{batch.sem}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getDepartmentBadgeColor(batch.department)}>
-                            {batch.department}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {batch.staff_advisor ? (
-                            <div>
-                              <div className="font-medium">
-                                {batch.staff_advisor.first_name} {batch.staff_advisor.last_name}
-                              </div>
-                              <div className="text-sm text-muted-foreground">{batch.staff_advisor.email}</div>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">No advisor</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleView(batch)}
-                              title="View details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(batch)}
-                              title="Edit batch"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(batch)}
-                              title="Delete batch"
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              {yearGroups.length > 0 && (
+                <div className="space-y-3">
+                  {yearGroups.map(([year, yearBatches], index) => (
+                    <BatchYearGroup
+                      key={year}
+                      year={year}
+                      batches={yearBatches}
+                      defaultOpen={index === 0}
+                      selectable
+                      showSem
+                      editable
+                      selectedIds={selectedIds}
+                      onToggleBatch={toggleBatchSelection}
+                      onToggleYear={toggleYearSelection}
+                      onView={handleView}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              )}
 
-              {renderPagination()}
+              {alumniYearGroups.length > 0 && (
+                <div className="mt-6">
+                  <div className="mb-2 flex items-center gap-2">
+                    <h3 className="font-semibold">Alumni</h3>
+                    <Badge variant="secondary">{alumniBatches.length}</Badge>
+                  </div>
+                  <div className="space-y-3">
+                    {alumniYearGroups.map(([year, yearBatches]) => (
+                      <BatchYearGroup
+                        key={year}
+                        year={year}
+                        batches={yearBatches}
+                        defaultOpen={false}
+                        selectable={false}
+                        showSem={false}
+                        editable={false}
+                        selectedIds={selectedIds}
+                        onToggleBatch={toggleBatchSelection}
+                        onView={handleView}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </CardContent>
@@ -317,6 +443,13 @@ export function BatchManagement() {
         open={bulkUploadDialogOpen}
         onOpenChange={setBulkUploadDialogOpen}
         onSuccess={handleAddSuccess}
+      />
+
+      <AdvanceSemesterDialog
+        batches={selectedBatches}
+        open={advanceDialogOpen}
+        onOpenChange={setAdvanceDialogOpen}
+        onSuccess={handleAdvanceSuccess}
       />
     </>
   );

@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Subject, listSubjects, PaginationInfo } from "@/lib/api/subject";
+import { Subject, listSubjects, listSchemes } from "@/lib/api/subject";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -13,33 +12,36 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Eye, Pencil, Trash2, Search, Plus, Upload } from "lucide-react";
+import { AlertCircle, ChevronRight, Eye, Pencil, Trash2, Plus, Upload } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 import { AddSubjectDialog } from "./add-subject-dialog";
 import { SubjectDialog } from "./subject-dialog";
 import { DeleteSubjectDialog } from "./delete-subject-dialog";
 import { BulkUploadSubjectDialog } from "./bulk-upload-subject-dialog";
 
-const ITEMS_PER_PAGE = 10;
+const SEMESTERS = Array.from({ length: 8 }, (_, i) => i + 1);
+const FETCH_LIMIT = 100;
 
 export function SubjectManagement() {
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [pagination, setPagination] = useState<PaginationInfo | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  
+  const [schemes, setSchemes] = useState<string[]>([]);
+  const [selectedScheme, setSelectedScheme] = useState<string>("");
+  const [schemesLoading, setSchemesLoading] = useState(true);
+  const [schemesError, setSchemesError] = useState<string | null>(null);
+
+  const [openSems, setOpenSems] = useState<Set<number>>(new Set());
+  const [subjectsBySem, setSubjectsBySem] = useState<Record<number, Subject[]>>({});
+  const [loadingSems, setLoadingSems] = useState<Set<number>>(new Set());
+  const [semErrors, setSemErrors] = useState<Record<number, string>>({});
+
   // Dialog states
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false);
@@ -48,28 +50,76 @@ export function SubjectManagement() {
   const [addSubjectDialogOpen, setAddSubjectDialogOpen] = useState(false);
   const [bulkUploadDialogOpen, setBulkUploadDialogOpen] = useState(false);
 
-  const fetchSubjects = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      const data = await listSubjects({
-        page: currentPage,
-        limit: ITEMS_PER_PAGE,
-      });
-      
-      setSubjects(data.subjects);
-      setPagination(data.pagination);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch subjects");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentPage]);
-
   useEffect(() => {
-    fetchSubjects();
-  }, [fetchSubjects]);
+    (async () => {
+      try {
+        setSchemesLoading(true);
+        setSchemesError(null);
+        const result = await listSchemes();
+        setSchemes(result);
+        if (result.length > 0) setSelectedScheme(result[0]);
+      } catch (err) {
+        setSchemesError(err instanceof Error ? err.message : "Failed to fetch schemes");
+      } finally {
+        setSchemesLoading(false);
+      }
+    })();
+  }, []);
+
+  // Scheme changed — every semester's cached data belongs to the old scheme.
+  useEffect(() => {
+    setOpenSems(new Set());
+    setSubjectsBySem({});
+    setSemErrors({});
+  }, [selectedScheme]);
+
+  const loadSem = useCallback(
+    async (sem: number, force = false) => {
+      if (!selectedScheme) return;
+      if (!force && subjectsBySem[sem] !== undefined) return;
+
+      setLoadingSems((prev) => new Set(prev).add(sem));
+      setSemErrors((prev) => {
+        const next = { ...prev };
+        delete next[sem];
+        return next;
+      });
+
+      try {
+        const data = await listSubjects({ scheme: selectedScheme, sem: String(sem), limit: FETCH_LIMIT });
+        setSubjectsBySem((prev) => ({ ...prev, [sem]: data.subjects }));
+      } catch (err) {
+        setSemErrors((prev) => ({
+          ...prev,
+          [sem]: err instanceof Error ? err.message : "Failed to fetch subjects",
+        }));
+      } finally {
+        setLoadingSems((prev) => {
+          const next = new Set(prev);
+          next.delete(sem);
+          return next;
+        });
+      }
+    },
+    [selectedScheme, subjectsBySem]
+  );
+
+  const toggleSem = (sem: number) => {
+    setOpenSems((prev) => {
+      const next = new Set(prev);
+      if (next.has(sem)) {
+        next.delete(sem);
+      } else {
+        next.add(sem);
+        loadSem(sem);
+      }
+      return next;
+    });
+  };
+
+  const refreshOpenSems = useCallback(() => {
+    for (const sem of openSems) loadSem(sem, true);
+  }, [openSems, loadSem]);
 
   const handleView = (subject: Subject) => {
     setSelectedSubject(subject);
@@ -89,76 +139,23 @@ export function SubjectManagement() {
   };
 
   const handleDeleteSuccess = async () => {
-    await fetchSubjects();
+    refreshOpenSems();
     setSelectedSubject(null);
   };
 
   const handleAddSuccess = async () => {
-    setCurrentPage(1);
-    await fetchSubjects();
+    refreshOpenSems();
   };
 
   const handleUpdateSuccess = async () => {
-    await fetchSubjects();
+    refreshOpenSems();
   };
 
   const getTypeBadgeColor = (type: string) => {
-    return type === "Theory" 
+    return type === "Theory"
       ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
       : "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
   };
-
-  const renderPagination = () => {
-    if (!pagination || pagination.totalPages <= 1) return null;
-
-    const pages = [];
-    for (let i = 1; i <= pagination.totalPages; i++) {
-      pages.push(i);
-    }
-
-    return (
-      <Pagination>
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious
-              onClick={() => currentPage > 1 && setCurrentPage(currentPage - 1)}
-              className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-            />
-          </PaginationItem>
-          
-          {pages.map((page) => (
-            <PaginationItem key={page}>
-              <PaginationLink
-                onClick={() => setCurrentPage(page)}
-                isActive={currentPage === page}
-                className="cursor-pointer"
-              >
-                {page}
-              </PaginationLink>
-            </PaginationItem>
-          ))}
-          
-          <PaginationItem>
-            <PaginationNext
-              onClick={() => currentPage < pagination.totalPages && setCurrentPage(currentPage + 1)}
-              className={currentPage === pagination.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-            />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
-    );
-  };
-
-  const filteredSubjects = subjects.filter((subject) => {
-    const query = searchQuery.toLowerCase();
-    return (
-      subject._id.toLowerCase().includes(query) ||
-      subject.name.toLowerCase().includes(query) ||
-      subject.subject_code.toLowerCase().includes(query) ||
-      subject.sem.toLowerCase().includes(query) ||
-      subject.type.toLowerCase().includes(query)
-    );
-  });
 
   return (
     <>
@@ -167,19 +164,9 @@ export function SubjectManagement() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <CardTitle>Subject Management</CardTitle>
-              <CardDescription>Manage course subjects and faculty assignments</CardDescription>
+              <CardDescription>Manage course subjects, grouped by scheme and semester</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative flex-1 md:flex-initial">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  placeholder="Search subjects..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 w-full md:w-62.5"
-                />
-              </div>
               <Button variant="outline" onClick={() => setBulkUploadDialogOpen(true)} className="gap-2">
                 <Upload className="h-4 w-4" />
                 Import CSV
@@ -192,90 +179,143 @@ export function SubjectManagement() {
           </div>
         </CardHeader>
         <CardContent>
-          {error && (
+          {schemesError && (
             <Alert variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{schemesError}</AlertDescription>
             </Alert>
           )}
 
-          {isLoading ? (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : filteredSubjects.length === 0 ? (
+          {schemesLoading ? (
+            <Skeleton className="h-9 w-full max-w-md" />
+          ) : schemes.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              {searchQuery ? "No subjects found matching your search" : "No subjects available"}
+              No subjects available yet — add one to get started.
             </div>
           ) : (
             <>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Subject Code</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Semester</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Marks</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredSubjects.map((subject) => (
-                      <TableRow key={subject._id}>
-                        <TableCell className="font-medium">{subject.subject_code}</TableCell>
-                        <TableCell>{subject.name}</TableCell>
-                        <TableCell>Sem {subject.sem}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getTypeBadgeColor(subject.type)}>
-                            {subject.type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            <div>Total: {subject.total_marks}</div>
-                            <div className="text-muted-foreground">Pass: {subject.pass_mark}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleView(subject)}
-                              title="View details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(subject)}
-                              title="Edit subject"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(subject)}
-                              title="Delete subject"
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={selectedScheme}
+                onValueChange={(value) => value && setSelectedScheme(value)}
+                className="mb-4 flex-wrap justify-start"
+              >
+                {schemes.map((scheme) => (
+                  <ToggleGroupItem key={scheme} value={scheme} className="px-4">
+                    {scheme}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
 
-              {renderPagination()}
+              <div className="space-y-3">
+                {SEMESTERS.map((sem) => {
+                  const isOpen = openSems.has(sem);
+                  const isLoading = loadingSems.has(sem);
+                  const subjects = subjectsBySem[sem];
+                  const error = semErrors[sem];
+
+                  return (
+                    <Collapsible key={sem} open={isOpen} onOpenChange={() => toggleSem(sem)}>
+                      <div className="rounded-md border">
+                        <CollapsibleTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 px-3 py-2.5 bg-muted/30 text-left"
+                          >
+                            <ChevronRight
+                              className={cn("h-4 w-4 transition-transform", isOpen && "rotate-90")}
+                            />
+                            <span className="font-semibold">Semester {sem}</span>
+                            {subjects && <Badge variant="secondary">{subjects.length}</Badge>}
+                          </button>
+                        </CollapsibleTrigger>
+
+                        <CollapsibleContent>
+                          {isLoading ? (
+                            <div className="space-y-2 p-3">
+                              {[...Array(2)].map((_, i) => (
+                                <Skeleton key={i} className="h-10 w-full" />
+                              ))}
+                            </div>
+                          ) : error ? (
+                            <Alert variant="destructive" className="m-3">
+                              <AlertCircle className="h-4 w-4" />
+                              <AlertDescription>{error}</AlertDescription>
+                            </Alert>
+                          ) : !subjects || subjects.length === 0 ? (
+                            <div className="py-6 text-center text-sm text-muted-foreground">
+                              No subjects in this semester yet.
+                            </div>
+                          ) : (
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Subject Code</TableHead>
+                                  <TableHead>Name</TableHead>
+                                  <TableHead>Department</TableHead>
+                                  <TableHead>Type</TableHead>
+                                  <TableHead>Marks</TableHead>
+                                  <TableHead className="text-right">Actions</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {subjects.map((subject) => (
+                                  <TableRow key={subject._id}>
+                                    <TableCell className="font-medium">{subject.subject_code}</TableCell>
+                                    <TableCell>{subject.name}</TableCell>
+                                    <TableCell>{subject.department || "—"}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={getTypeBadgeColor(subject.type)}>
+                                        {subject.type}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="text-sm">
+                                        <div>Total: {subject.total_marks}</div>
+                                        <div className="text-muted-foreground">Pass: {subject.pass_mark}</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <div className="flex justify-end gap-2">
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleView(subject)}
+                                          title="View details"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleEdit(subject)}
+                                          title="Edit subject"
+                                        >
+                                          <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleDelete(subject)}
+                                          title="Delete subject"
+                                          className="text-destructive hover:text-destructive"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </CollapsibleContent>
+                      </div>
+                    </Collapsible>
+                  );
+                })}
+              </div>
             </>
           )}
         </CardContent>

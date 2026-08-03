@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Batch, updateBatchById, isKnownPopulateResponseIssue, getUnknownErrorMessage } from "@/lib/api/batch";
+import { Batch, updateBatchById, isKnownPopulateResponseIssue, getUnknownErrorMessage, isAlumniSem } from "@/lib/api/batch";
 import { listUsers } from "@/lib/api/user";
 import type { User } from "@/lib/types/UserTypes";
 import {
@@ -55,6 +55,7 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { StaffAdvisorCombobox } from "./staff-advisor-combobox";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -453,31 +454,14 @@ export function BatchDialog({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Staff Advisor *</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                          disabled={loadingTeachers}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue
-                                placeholder={loadingTeachers ? "Loading…" : "Select advisor"}
-                              />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {teacherList.map((t) => (
-                              <SelectItem key={t._id} value={t._id}>
-                                {t.name}
-                                {t.role && (
-                                  <span className="ml-1 text-xs text-muted-foreground capitalize">
-                                    · {t.role}
-                                  </span>
-                                )}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <StaffAdvisorCombobox
+                            teachers={teacherList}
+                            value={field.value}
+                            onChange={field.onChange}
+                            loading={loadingTeachers}
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -581,18 +565,20 @@ export function BatchDialog({
                   )}
                 </div>
 
-                {/* Edit button */}
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    setIsEditing(true);
-                    fetchTeachers();
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit Batch
-                </Button>
+                {/* Edit button — alumni batches are view-only */}
+                {!isAlumniSem(batch.sem) && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setIsEditing(true);
+                      fetchTeachers();
+                    }}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit Batch
+                  </Button>
+                )}
               </div>
 
               {/* ── Right: student roster ── */}

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Papa from "papaparse";
+import { format } from "date-fns";
 import { listUsers, deleteUserById } from "@/lib/api/user";
 import { User, UserRole, PaginationInfo } from "@/lib/types/UserTypes";
 import { Batch, listBatches } from "@/lib/api/batch";
@@ -25,7 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Eye, Pencil, Trash2, Search, UserPlus, Upload, ChevronRight, ChevronDown, Folder, Users, LayoutList } from "lucide-react";
+import { AlertCircle, Eye, Pencil, Trash2, Search, UserPlus, Upload, Download, Loader2, ChevronRight, ChevronDown, Folder, Users, LayoutList } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -38,7 +40,7 @@ import {
 import { UserDialog } from "./user-dialog";
 import { DeleteUserDialog } from "./delete-user-dialog";
 import { AddUserDialog } from "./add-user-dialog";
-import { BulkUploadDialog } from "./bulk-upload-dialog";
+import { BulkUploadDialog, TEMPLATE_HEADERS, downloadTextFile } from "./bulk-upload-dialog";
 
 const DEFAULT_ITEMS_PER_PAGE = 10;
 
@@ -74,6 +76,7 @@ export default function UsersPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [addUserDialogOpen, setAddUserDialogOpen]     = useState(false);
   const [bulkUploadDialogOpen, setBulkUploadDialogOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const toggleYear = (year: number) => {
     setExpandedYears(prev => 
@@ -189,6 +192,87 @@ export default function UsersPage() {
     } catch (err) { setError("Failed to delete user"); }
   };
 
+  /** Fetches every user matching the currently active filters (tab/batch/search), across all pages. */
+  const fetchAllUsersForExport = useCallback(async (): Promise<User[]> => {
+    const currentTabConfig = ROLE_TABS.find((tab) => tab.value === selectedTab);
+    if (!currentTabConfig) return [];
+
+    const allExportUsers: User[] = [];
+    for (const role of currentTabConfig.roles) {
+      let page = 1;
+      const limit = 100;
+      while (true) {
+        const payload: any = { role, page, limit, search: activeSearch || undefined };
+        if (selectedTab === "student" && selectedBatchId) payload.batch = selectedBatchId;
+        const data = await listUsers(payload);
+        allExportUsers.push(...data.users);
+        if (data.users.length === 0 || page >= data.pagination.totalPages) break;
+        page++;
+      }
+    }
+    return allExportUsers;
+  }, [selectedTab, activeSearch, selectedBatchId]);
+
+  // Export uses the same template as bulk-upload, minus "Generate Mails"
+  // (existing users don't need a mail-generation instruction).
+  const EXPORT_HEADERS = TEMPLATE_HEADERS.filter((h) => h !== "Generate Mails");
+
+  const formatDateOnly = (value?: string): string => {
+    if (!value) return "";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "" : format(d, "yyyy-MM-dd");
+  };
+
+  const batchIdById = useMemo(() => new Map(batches.map((b) => [b._id, b.id])), [batches]);
+
+  const buildExportRow = (user: User): string[] => {
+    const p = (user.profile ?? {}) as any;
+    const batch = p.batch;
+    const batchValue = batch
+      ? typeof batch === "string"
+        ? batchIdById.get(batch) ?? ""
+        : batch.id || batchIdById.get(batch._id) || ""
+      : "";
+
+    return [
+      user.first_name ?? "",
+      user.last_name ?? "",
+      user.role,
+      user.email ?? "",
+      "",
+      p.adm_number ?? "",
+      p.adm_year != null ? String(p.adm_year) : "",
+      p.candidate_code ?? "",
+      p.department ?? "",
+      formatDateOnly(p.date_of_birth),
+      batchValue,
+    ];
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      setIsExporting(true);
+      setError(null);
+
+      const exportUsers = await fetchAllUsersForExport();
+      const csv = Papa.unparse({
+        fields: [...EXPORT_HEADERS],
+        data: exportUsers.map(buildExportRow),
+      });
+
+      const scopeLabel =
+        selectedTab === "student" && selectedBatchId
+          ? (batches.find((b) => b._id === selectedBatchId)?.name || "batch").replace(/\s+/g, "-")
+          : selectedTab;
+
+      downloadTextFile(`ams-users-${scopeLabel}-${Date.now()}.csv`, csv + "\n");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export users");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       setActiveSearch(searchQuery);
@@ -215,6 +299,10 @@ export default function UsersPage() {
               <CardDescription>View, edit, and manage all users in the system</CardDescription>
             </div>
             <div className="flex w-full md:w-auto flex-col md:flex-row gap-2">
+              <Button variant="outline" onClick={handleExportCsv} disabled={isExporting}>
+                {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Export CSV
+              </Button>
               <Button variant="outline" onClick={() => setBulkUploadDialogOpen(true)}><Upload className="mr-2 h-4 w-4" /> Import CSV</Button>
               <Button onClick={() => setAddUserDialogOpen(true)}><UserPlus className="mr-2 h-4 w-4" /> Add New User</Button>
             </div>

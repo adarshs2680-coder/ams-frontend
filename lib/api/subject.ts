@@ -97,6 +97,25 @@ export async function listSubjects(params?: ListSubjectsParams): Promise<ListSub
 }
 
 /**
+ * List distinct scheme values across all subjects.
+ */
+export async function listSchemes(): Promise<string[]> {
+  const response = await fetch(`${API_BASE}/academics/subject/schemes`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch schemes');
+  }
+
+  const result: ApiResponse<{ schemes: string[] }> = await response.json();
+  return result.data.schemes;
+}
+
+/**
  * Get a specific subject by ID
  */
 export async function getSubjectById(id: string): Promise<Subject> {

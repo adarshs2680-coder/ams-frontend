@@ -8,6 +8,7 @@ import type { SubjectAttendanceStats } from "@/lib/api/attendance-stats";
 
 type AttendanceOverviewProps = {
   attendance: SubjectAttendanceStats[];
+  warningText?: string;
 };
 
 const AttendanceGauge = ({ percentage, colorClass }: { percentage: number, colorClass: string }) => {
@@ -48,7 +49,7 @@ const AttendanceGauge = ({ percentage, colorClass }: { percentage: number, color
   );
 };
 
-export default function AttendanceOverview({ attendance }: AttendanceOverviewProps) {
+export default function AttendanceOverview({ attendance, warningText }: AttendanceOverviewProps) {
   const totalAttended = attendance.reduce((sum, item) => sum + item.attendedClasses, 0);
   const totalClasses = attendance.reduce((sum, item) => sum + item.totalClasses, 0);
   const overallPercentage = totalClasses > 0 ? Math.round((totalAttended / totalClasses) * 100) : 0;
@@ -112,7 +113,15 @@ export default function AttendanceOverview({ attendance }: AttendanceOverviewPro
               <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
                 <span>{subject.attendedClasses} / {subject.totalClasses} classes</span>
                 {subject.percentage >= 75 ? (
-                  <span className="text-green-600 dark:text-green-400">Can skip {subject.classesCanSkip} {subject.classesCanSkip === 1 ? 'class' : 'classes'}</span>
+                  subject.classesCanSkip > 0 ? (
+                    <span className="text-green-600 dark:text-green-400">
+                      Do not skip more than   {subject.classesCanSkip} {subject.classesCanSkip === 1 ? 'class' : 'classes'}
+                    </span>
+                  ) : (
+                    <span className="text-green-600 dark:text-green-400">
+                      Don&apos;t skip any classes.
+                    </span>
+                  )
                 ) : (
                   <span className="text-red-600 dark:text-red-400">Need {subject.classesNeeded} {subject.classesNeeded === 1 ? 'class' : 'classes'} to reach 75%</span>
                 )}
@@ -124,7 +133,7 @@ export default function AttendanceOverview({ attendance }: AttendanceOverviewPro
         {overallPercentage < 75 && (
           <div className="p-3 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
             <p className="text-xs text-yellow-800 dark:text-yellow-200">
-              ⚠️ Your attendance is below 75%. Please attend classes regularly.
+              {warningText ?? "⚠️ Your attendance is below 75%. Please attend classes regularly."}
             </p>
           </div>
         )}

@@ -36,6 +36,7 @@ type FormData = {
   dateOfBirth: string;
   designation: string;
   dateOfJoining: string;
+  relation: string;
 };
 
 const parseBackendErrorPayload = (payload: unknown): { statusCode?: number; message: string; raw: string } => {
@@ -259,6 +260,7 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
     batch: '',
     admissionNumber: '', admissionYear: '', candidateCode: '', department: '', dateOfBirth: '',
     designation: '', dateOfJoining: '',
+    relation: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const router = useRouter();
@@ -267,16 +269,18 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
 
   const signupEnabled = config[FLAGS.SIGNUP] !== false;
 
-  const ip = (incompleteProfile as any);
-  const ipProfile = (ip?.profile ?? ip ?? {}) as any;
+  // Refactor locking logic to be based on the `user` object from context,
+  // which is the single source of truth for the user's current state.
+  const profile = (user?.profile ?? {}) as any;
+  const parentIsLinked = user?.role === 'parent' && Boolean(profile.child);
   const locked = {
-    name: Boolean(incompleteProfile?.first_name || incompleteProfile?.last_name || (incompleteProfile as any)?.name),
-    batch: Boolean(ipProfile?.batch),
-    admissionNumber: Boolean(ipProfile?.adm_number),
-    admissionYear: Boolean(ipProfile?.adm_year),
-    candidateCode: Boolean(ipProfile?.candidate_code),
-    department: Boolean(ipProfile?.department),
-    dateOfBirth: Boolean(ipProfile?.date_of_birth),
+    name: Boolean(user?.first_name || user?.last_name),
+    batch: Boolean(profile.batch),
+    admissionNumber: Boolean(profile.adm_number),
+    admissionYear: Boolean(profile.adm_year),
+    candidateCode: Boolean(profile.candidate_code) || parentIsLinked,
+    department: Boolean(profile.department),
+    dateOfBirth: Boolean(profile.date_of_birth),
   };
 
   useEffect(() => {
@@ -287,9 +291,8 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
       return router.push(redirectUrl);
     }
     
-    // Check if user has a role
-    if (!user.role || (user.role == 'parent')) {
-      setError('Only students and teachers can complete registration.');
+    if (!user.role || !['student', 'teacher', 'parent'].includes(user.role)) {
+      setError('Your user role is not eligible for onboarding.');
       return;
     }
 
@@ -298,37 +301,56 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
       return value.includes('T') ? value.split('T')[0] : value;
     };
 
-    const profile = (incompleteProfile ?? user) as User;
-    const role = incompleteProfile?.role || user.role;
-    const p = ((profile as any).profile ?? profile) as any;
+    // Refactor form population to use the `user` object from context.
+    const role = user.role;
+    const p = (user.profile ?? {}) as any;
 
-    const fullName = profile.name || user.name || '';
-    const inferredFirstName = fullName.split(' ')[0] || '';
-    const inferredLastName = fullName.split(' ').slice(1).join(' ') || '';
+    const fullName = user.name || '';
+    const inferredFirstName = user.first_name || fullName.split(' ')[0] || '';
+    const inferredLastName = user.last_name || fullName.split(' ').slice(1).join(' ') || '';
 
-    const batchValue = p.batch ?? (profile as any).batch;
-    const batchId = typeof batchValue === 'string' ? batchValue : batchValue?._id;
+    const batchId = typeof p.batch === 'string' ? p.batch : p.batch?._id;
+
+    const linkedChild = role === 'parent' ? p.child : undefined;
+    const linkedChildProfile = (typeof linkedChild === 'object' && linkedChild !== null) ? (linkedChild.profile ?? {}) : {};
 
     setFormData({
-      firstName: profile.first_name || user.first_name || inferredFirstName,
-      lastName: profile.last_name || user.last_name || inferredLastName,
-      phone: String(profile.phone ?? user.phone ?? ''),
-      gender: (profile.gender || user.gender || '') as string,
+      firstName: inferredFirstName,
+      lastName: inferredLastName,
+      phone: String(user.phone ?? ''),
+      gender: (user.gender || '') as string,
+      // student
       batch: batchId || '',
       admissionNumber: p.adm_number || '',
       admissionYear: p.adm_year ? String(p.adm_year) : '',
-      candidateCode: p.candidate_code || '',
+      candidateCode: role === 'parent' ? (linkedChildProfile.candidate_code || p.candidate_code || '') : (p.candidate_code || ''),
       department: (p.department || '') as string,
       dateOfBirth: toInputDate(p.date_of_birth),
+      // teacher
       designation: role === 'teacher' ? (p.designation || '') : '',
       dateOfJoining: toInputDate(role === 'teacher' ? p.date_of_joining : undefined),
+      // parent
+      relation: role === 'parent' ? (p.relation || '') : '',
     });
 
     setIsLoading(false);
   }, [incompleteProfile, isPending, router, searchParams, session, user]);
   
     const handleInputChange = (field: keyof FormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const newState = { ...prev, [field]: value };
+      // For parents, autofill relation based on gender
+      if (user?.role === 'parent' && field === 'gender') {
+        if (value === 'male') {
+          newState.relation = 'father';
+        } else if (value === 'female') {
+          newState.relation = 'mother';
+        } else {
+          newState.relation = ''; // Reset for 'other'
+        }
+      }
+      return newState;
+    });
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   };
 
@@ -359,6 +381,11 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
       if (!formData.designation.trim()) newErrors.designation = 'Required';
       if (!formData.department) newErrors.department = 'Required';
       if (!formData.dateOfJoining) newErrors.dateOfJoining = 'Required';
+    } else if (user?.role === 'parent') {
+      if (!formData.relation) newErrors.relation = 'Please select your relation';
+      if (!locked.candidateCode && !formData.candidateCode.trim()) {
+        newErrors.candidateCode = 'Child\'s Candidate Code is required';
+      }
     }
 
     setErrors(newErrors);
@@ -379,6 +406,13 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
       const phoneNumber = Number(formData.phone.replace(/\D/g, ''));
       const admissionYear = formData.admissionYear ? Number(formData.admissionYear) : undefined;
 
+      const parentProfilePayload: { relation: string; candidate_code?: string } = {
+        relation: formData.relation,
+      };
+      if (user?.role === 'parent' && !locked.candidateCode) {
+        parentProfilePayload.candidate_code = formData.candidateCode;
+      }
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/user`, {
         method: 'POST',
         headers: {
@@ -397,11 +431,11 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
             candidate_code: formData.candidateCode,
             department: formData.department,
             date_of_birth: formData.dateOfBirth,
-          } : {
+          } : user?.role === 'teacher' ? {
             designation: formData.designation,
             department: formData.department,
             date_of_joining: formData.dateOfJoining,
-          },
+          } : user?.role === 'parent' ? parentProfilePayload : {},
         }),
       });
 
@@ -582,36 +616,34 @@ export function SignUpUserAuthForm({ className, ...props }: UserAuthFormProps) {
             )}
             <FormField id="dateOfBirth" label="Date of Birth" type="date" value={formData.dateOfBirth} error={errors.dateOfBirth} disabled={locked.dateOfBirth} onChange={handleInputEvent} />
           </>
-        ): (
+        ) : user?.role === 'teacher' ? (
           <>
-            <FormField id="designation" label="Designation" placeholder="Assistant Professor" value={formData.designation} error={errors.designation} onChange={handleInputEvent} />
-            {!locked.department ? (
-              <SelectField id="department" label="Department" value={formData.department} error={errors.department} placeholder="Select department"
-                options={[{ value: 'CSE', label: 'Computer Science and Engineering' }, { value: 'ECE', label: 'Electronics and Communication Engineering' }, { value: 'IT', label: 'Information Technology' }]} onValueChange={(value) => handleInputChange('department', value)} />
-            ) : (
-              <FormField id="department" label="Department" placeholder="Department" value={formData.department} error={errors.department} disabled={locked.department} onChange={handleInputEvent} />
-            )}
+            <FormField id="designation" label="Designation" placeholder="e.g., Assistant Professor" value={formData.designation} error={errors.designation} onChange={handleInputEvent} />
+            <SelectField id="department" label="Department" value={formData.department} error={errors.department} placeholder="Select department" options={departments} onValueChange={(value) => handleInputChange('department', value)} />
             <FormField id="dateOfJoining" label="Date of Joining" type="date" value={formData.dateOfJoining} error={errors.dateOfJoining} onChange={handleInputEvent} />
           </>
-        )}
+        ) : user?.role === 'parent' ? (
+          <>
+            <SelectField 
+              id="relation" 
+              label="Relation to Child" 
+              value={formData.relation} 
+              error={errors.relation} 
+              placeholder="Select relation"
+              options={[{ value: 'mother', label: 'Mother' }, { value: 'father', label: 'Father' }, { value: 'guardian', label: 'Guardian' }]} 
+              onValueChange={(value) => handleInputChange('relation', value)} 
+            />
+            {!locked.candidateCode && (
+              <FormField id="candidateCode" label="Child's Candidate Code" placeholder="Enter your child's candidate code" value={formData.candidateCode} error={errors.candidateCode} onChange={handleInputEvent} />
+            )}
+          </>
+        ) : null}
 
-        <Button className="w-full" type="submit" disabled={isLoading}>
+        <Button disabled={isLoading} className="w-full">
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {!isLoading && "Complete Registration"}
+          Complete Registration
         </Button>
       </form>
-
-      <p className="px-6 text-center text-xs text-muted-foreground">
-        By clicking continue, you agree to our{" "}
-        <a href="/terms" className="underline underline-offset-4 hover:text-primary">
-          Terms of Service
-        </a>{" "}
-        and{" "}
-        <a href="/privacy" className="underline underline-offset-4 hover:text-primary">
-          Privacy Policy
-        </a>
-        .
-      </p>
     </div>
-  )
+  );
 }

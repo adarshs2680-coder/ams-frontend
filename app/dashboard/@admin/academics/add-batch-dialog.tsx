@@ -37,6 +37,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { StaffAdvisorCombobox } from "./staff-advisor-combobox";
 
 const createBatchSchema = z.object({
   id: z.string().regex(/^[0-9]{2}[A-Z]{2,3}[0-9]*$/, "Batch ID must match format like 24CSE, 24CSE1, 24CSE2").optional().or(z.literal("")),
@@ -168,7 +169,7 @@ export function AddBatchDialog({ open, onOpenChange, onSuccess }: AddBatchDialog
 
   return (
     <Dialog open={open} onOpenChange={handleDialogChange}>
-      <DialogContent className="sm:max-w-[95vw] w-full max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-md w-full max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Batch</DialogTitle>
           <DialogDescription>
@@ -299,20 +300,14 @@ export function AddBatchDialog({ open, onOpenChange, onSuccess }: AddBatchDialog
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Staff Advisor *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={loadingTeachers}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingTeachers ? "Loading teachers..." : "Select staff advisor"} />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {teachers.map((teacher) => (
-                        <SelectItem key={teacher._id} value={teacher._id!}>
-                          {teacher.first_name} {teacher.last_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    <StaffAdvisorCombobox
+                      teachers={teachers}
+                      value={field.value}
+                      onChange={field.onChange}
+                      loading={loadingTeachers}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

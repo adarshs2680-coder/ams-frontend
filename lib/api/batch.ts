@@ -26,6 +26,8 @@ export interface Batch {
   staff_advisor: StaffAdvisor;
   scheme: string;
   sem: string;
+  // Number of students currently in this batch (returned by list endpoint only).
+  studentCount?: number;
 }
 
 export interface ApiResponse<T> {
@@ -278,6 +280,66 @@ export async function deleteBatchById(id: string): Promise<void> {
     const error = await response.json();
     throw new Error(error.message || 'Failed to delete batch');
   }
+}
+
+export interface AdvanceSemResult {
+  _id: string;
+  name: string;
+  previousSem: string;
+  sem: string;
+}
+
+/**
+ * Advance the semester for a set of batches (admin only).
+ * - Pass `sem` to set all selected batches to that exact value.
+ * - Omit `sem` to increment each batch's current semester by 1 (capped at 8).
+ */
+export async function advanceBatchSemesters(
+  batchIds: string[],
+  sem?: number
+): Promise<AdvanceSemResult[]> {
+  const response = await fetch(`${API_BASE}/academics/batch/advance-sem`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ batchIds, ...(sem != null ? { sem } : {}) }),
+  });
+
+  const { payload, message } = await parseResponsePayload<{ updated: AdvanceSemResult[] }>(response);
+
+  if (!response.ok) {
+    throw new Error(message || payload.message || 'Failed to advance semester');
+  }
+
+  return payload.data?.updated ?? [];
+}
+
+/** Sentinel `sem` value marking a batch as graduated/alumni. */
+export const ALUMNI_SEM = "100";
+
+export function isAlumniSem(sem: string): boolean {
+  return sem === ALUMNI_SEM;
+}
+
+/**
+ * Converts semester-8 batches to alumni (admin only, one-way). Batches not
+ * currently at semester 8 will be rejected by the backend.
+ */
+export async function convertBatchesToAlumni(batchIds: string[]): Promise<AdvanceSemResult[]> {
+  const response = await fetch(`${API_BASE}/academics/batch/convert-alumni`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ batchIds }),
+  });
+
+  const { payload, message } = await parseResponsePayload<{ updated: AdvanceSemResult[] }>(response);
+
+  if (!response.ok) {
+    throw new Error(message || payload.message || 'Failed to convert batches to alumni');
+  }
+
+  return payload.data?.updated ?? [];
 }
 
 export type CreateBatchesBulkResponse = ApiResponse<{

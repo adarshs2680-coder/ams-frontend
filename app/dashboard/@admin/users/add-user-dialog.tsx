@@ -24,6 +24,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -40,7 +41,8 @@ const createUserFormSchema = z
   .object({
     first_name: z.string().min(1, "First name is required"),
     last_name: z.string().min(1, "Last name is required"),
-    email: z.string().email("Invalid email address"),
+    email: z.string().email("Invalid email address").optional().or(z.literal("")),
+    generate_mail: z.boolean().optional(),
     role: z.enum(["student", "teacher", "parent", "hod", "principal", "staff", "admin"] as const),
     password: z.string().min(8, "Password must be at least 8 characters").optional().or(z.literal("")),
     // Student-only
@@ -58,6 +60,38 @@ const createUserFormSchema = z
         message: "Batch is required for students",
         path: ["batch"],
       });
+    }
+
+    if (!val.generate_mail && !val.email) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Email is required unless Generate Mail is enabled",
+        path: ["email"],
+      });
+    }
+
+    if (val.generate_mail) {
+      if (!val.candidate_code) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Candidate Code is required when Generate Mail is enabled",
+          path: ["candidate_code"],
+        });
+      }
+      if (!val.adm_year) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Admission Year is required when Generate Mail is enabled",
+          path: ["adm_year"],
+        });
+      }
+      if (!val.department) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Department is required when Generate Mail is enabled",
+          path: ["department"],
+        });
+      }
     }
   });
 
@@ -83,6 +117,7 @@ export function AddUserDialog({ open, onOpenChange, onSuccess }: AddUserDialogPr
       first_name: "",
       last_name: "",
       email: "",
+      generate_mail: false,
       role: "student",
       password: "",
       batch: "",
@@ -95,6 +130,7 @@ export function AddUserDialog({ open, onOpenChange, onSuccess }: AddUserDialogPr
   });
 
   const selectedRole = form.watch("role");
+  const generateMail = form.watch("generate_mail");
 
   useEffect(() => {
     const loadBatches = async () => {
@@ -112,6 +148,12 @@ export function AddUserDialog({ open, onOpenChange, onSuccess }: AddUserDialogPr
     };
     loadBatches();
   }, [open, selectedRole]);
+
+  useEffect(() => {
+    if (selectedRole !== "student") {
+      form.setValue("generate_mail", false);
+    }
+  }, [selectedRole, form]);
 
   const batchOptions = useMemo(
     () => batches.map((b) => ({ value: b._id, label: `${b.name} (${b.adm_year})` })),
@@ -137,10 +179,11 @@ export function AddUserDialog({ open, onOpenChange, onSuccess }: AddUserDialogPr
       const payload: BulkCreateUserData = {
         first_name: data.first_name,
         last_name: data.last_name,
-        email: data.email,
         role: data.role,
+        generate_mail: data.generate_mail,
       };
 
+      if (data.email) payload.email = data.email;
       if (data.password) payload.password = data.password;
 
       if (data.role === "student") {
@@ -248,14 +291,38 @@ export function AddUserDialog({ open, onOpenChange, onSuccess }: AddUserDialogPr
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email *</FormLabel>
+                      <FormLabel>Email {generateMail ? "" : "*"}</FormLabel>
                       <FormControl>
-                        <Input type="email" placeholder="john.doe@uck.ac.in" {...field} autoComplete="off" />
+                        <Input
+                          type="email"
+                          placeholder={generateMail ? "Leave blank to auto-generate" : "john.doe@uck.ac.in"}
+                          {...field}
+                          autoComplete="off"
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                {/* Generate Mail (student only) */}
+                {selectedRole === "student" && (
+                  <FormField
+                    control={form.control}
+                    name="generate_mail"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center gap-2 space-y-0 self-end pb-2">
+                        <FormControl>
+                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                        <FormLabel className="mt-0!">
+                          Generate Mail (requires Candidate Code, Adm Year, Department)
+                        </FormLabel>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 {/* Role */}
                 <FormField
